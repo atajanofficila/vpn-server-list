@@ -1,0 +1,32 @@
+name: Update VPN Servers
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # her 15 dakika
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repo çek
+        uses: actions/checkout@v3
+
+      - name: Python kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.x
+
+      - name: Script çalıştır
+        run: |
+          pip install requests
+          python script.py
+
+      - name: Git push
+        run: |
+          git config --global user.name "vpn-bot"
+          git config --global user.email "bot@github.com"
+          git add servers.json
+          git commit -m "update servers" || echo "no changes"
+          git push

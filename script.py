@@ -4,13 +4,13 @@ import json
 URL = "http://www.vpngate.net/api/iphone/"
 
 def fetch_servers():
-    res = requests.get(URL, timeout=15)
+    res = requests.get(URL, timeout=20)
     lines = res.text.splitlines()
 
     servers = []
 
     for line in lines:
-        if line.startswith("*") or line.strip() == "":
+        if line.startswith("*") or line.startswith("#") or line.strip() == "":
             continue
 
         parts = line.split(",")
@@ -19,11 +19,11 @@ def fetch_servers():
             continue
 
         try:
-            ping = int(parts[3])
-            speed = int(parts[4])
+            ping = int(parts[3] or 9999)
+            speed = int(parts[4] or 0)
 
-            # filtre
-            if ping > 200 or speed < 1000000:
+            config = parts[14].strip()
+            if not config:
                 continue
 
             server = {
@@ -31,7 +31,7 @@ def fetch_servers():
                 "country": parts[5],
                 "ping": ping,
                 "speed": speed,
-                "config": parts[14]
+                "config": config
             }
 
             servers.append(server)
@@ -39,17 +39,18 @@ def fetch_servers():
         except:
             continue
 
-    # en iyi 50 server
-    servers = sorted(servers, key=lambda x: x["ping"])[:50]
+    # sadece sırala
+    servers = sorted(servers, key=lambda x: x["ping"])
 
     return servers
 
 
 def save_json(data):
     with open("servers.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
     servers = fetch_servers()
     save_json(servers)
+    print("Saved:", len(servers))

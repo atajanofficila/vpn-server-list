@@ -1,37 +1,61 @@
 import requests
 import json
+import csv
+from collections import defaultdict
 
 URL = "http://www.vpngate.net/api/iphone/"
+OUTPUT = "servers.json"
 
-def fetch_servers():
-    res = requests.get(URL, timeout=15)
-    lines = res.text.splitlines()
+MAX_SERVERS = 120
+MAX_PER_COUNTRY = 5
+MAX_PING = 350
+MIN_SPEED = 300000
 
+def fetch_data():
+    r = requests.get(URL, timeout=25)
+    r.raise_for_status()
+    return r.text
+
+def parse_servers(raw):
+    lines = raw.splitlines()
+
+    start = 0
+    for i, line in enumerate(lines):
+        if line.startswith("#HostName"):
+            start = i
+            break
+
+    reader = csv.DictReader(lines[start:])
     servers = []
 
-    for line in lines:
-        if line.startswith("*") or line.strip() == "":
-            continue
-
-        parts = line.split(",")
-
-        if len(parts) < 15:
-            continue
-
+    for row in reader:
         try:
-            ping = int(parts[3])
-            speed = int(parts[4])
+            config = row.get("OpenVPN_ConfigData_Base64", "").strip()
+            if not config:
+                continue
 
-            # filtre
-            if ping > 200 or speed < 1000000:
+            ping = int(row.get("Ping", "9999") or 9999)
+            speed = int(row.get("Speed", "0") or 0)
+
+            if ping > MAX_PING:
+                continue
+
+            if speed < MIN_SPEED:
+                continue
+
+            country = row.get("CountryLong", "Unknown").strip()
+            ip = row.get("IP", "").strip()
+
+            if not ip:
                 continue
 
             server = {
-                "ip": parts[1],
-                "country": parts[5],
+                "country": country,
+                "ip": ip,
                 "ping": ping,
                 "speed": speed,
-                "config": parts[14]
+                "score": int(row.get("Score", "0") or 0),
+                "config": config
             }
 
             servers.append(server)
@@ -39,17 +63,64 @@ def fetch_servers():
         except:
             continue
 
-    # en iyi 50 server
-    servers = sorted(servers, key=lambda x: x["ping"])[:50]
-
     return servers
 
+def remove_duplicates(servers):
+    seen = set()
+    clean = []
+
+    for s in servers:
+        key = (s["ip"], s["country"])
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append(s)
+
+    return clean
+
+def smart_sort(servers):
+    return sorted(
+        servers,
+        key=lambda x: (
+            x["ping"],
+            -x["speed"],
+            -x["score"]
+        )
+    )
+
+def balance_countries(servers):
+    grouped = defaultdict(list)
+
+    for s in servers:
+        grouped[s["country"]].append(s)
+
+    final = []
+
+    for country, items in grouped.items():
+        items = smart_sort(items)
+        final.extend(items[:MAX_PER_COUNTRY])
+
+    final = smart_sort(final)
+    return final[:MAX_SERVERS]
 
 def save_json(data):
-    with open("servers.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    with open(OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
+def main():
+    print("Fetching VPNGate servers...")
+    raw = fetch_data()
+
+    servers = parse_servers(raw)
+    print("Parsed:", len(servers))
+
+    servers = remove_duplicates(servers)
+    print("Unique:", len(servers))
+
+    servers = balance_countries(servers)
+
+    save_json(servers)
+    print("Saved:", len(servers), "servers ->", OUTPUT)
 
 if __name__ == "__main__":
-    servers = fetch_servers()
-    save_json(servers)
+    main()
